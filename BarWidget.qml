@@ -16,7 +16,7 @@ import qs.Ui
 // hidden on a vertical bar, like Omarchy's own text widgets.
 BarWidget {
   id: root
-  moduleName: "evindor.keystroke"
+  moduleName: "smr.keystroke"
 
   readonly property var keystroke: {
     var shell = root.bar ? root.bar.shell : null

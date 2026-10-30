@@ -46,10 +46,23 @@ def default_browser():
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=1)
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+                return resolve_wrapper(result.stdout.strip())
         except (OSError, subprocess.TimeoutExpired):
             pass
     return ""
+
+
+# smr: Omarchy registers its own omarchy-browser.desktop as the default; it
+# only forwards to the real browser, which omarchy-cmd-default-browser names.
+def resolve_wrapper(desktop):
+    if desktop != "omarchy-browser.desktop":
+        return desktop
+    try:
+        result = subprocess.run(["omarchy-cmd-default-browser"], capture_output=True, text=True, timeout=1)
+        real = result.stdout.strip().splitlines()[0] if result.returncode == 0 and result.stdout.strip() else ""
+        return real if real and real != desktop else desktop
+    except (OSError, subprocess.TimeoutExpired):
+        return desktop
 
 
 def profiles(desktop, home, config):

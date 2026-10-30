@@ -42,6 +42,8 @@ Item {
   CommandsProvider { id: commandsProvider; host: root.host }
   SettingsProvider { id: settingsProvider; host: root.host }
 
+  // smr: the loaded keybindings, for the preview pane's shortcut line.
+  readonly property var hotkeyBinds: hotkeys.binds
   readonly property var bundled: [omarchyMenu, applications, openUrl, calculator, converter, colors, emoji, clipboard, dictation, files, hotkeys, codex, aiWeb, extensions, commandsProvider, settingsProvider]
   readonly property var reserved: bundled.map(function(b) { return b.provider.id }).concat(["palette", "dmenu", "matching", "voice"])
 

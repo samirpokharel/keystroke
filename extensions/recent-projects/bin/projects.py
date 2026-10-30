@@ -97,7 +97,7 @@ def recent(user, home):
     except sqlite3.Error:
         return []
     if not row or row[0] is None:
-        return []
+        return menubar_recent(user, home)
     value = row[0]
     if len(value) > VALUE_LIMIT:
         return []
@@ -108,6 +108,39 @@ def recent(user, home):
     found, seen = [], set()
     for item in items if isinstance(items, list) else ():
         e = entry(item, home, user.parent / "Workspaces")
+        if e and e["uri"] not in seen:
+            seen.add(e["uri"])
+            found.append(e)
+            if len(found) >= MAX_ENTRIES:
+                break
+    return found
+
+
+# smr: VS Code 1.143 no longer keeps RECENT_KEY in state.vscdb; the File >
+# Open Recent menu it saves in storage.json still lists the same folders,
+# workspaces and files, newest first. Map those back to history entries.
+MENU_KINDS = {"openRecentFolder": "folderUri", "openRecentWorkspace": "workspace", "openRecentFile": "fileUri"}
+
+
+def menubar_recent(user, home):
+    path = user / "globalStorage" / "storage.json"
+    try:
+        if not path.is_file() or path.stat().st_size > VALUE_LIMIT:
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        items = data["lastKnownMenubarData"]["menus"]["File"]["items"]
+        recent_menu = next(i for i in items if i.get("id") == "submenuitem.MenubarRecentMenu")
+        menu_items = recent_menu["submenu"]["items"]
+    except (OSError, ValueError, KeyError, TypeError, StopIteration, AttributeError):
+        return []
+    found, seen = [], set()
+    for item in menu_items if isinstance(menu_items, list) else ():
+        kind = MENU_KINDS.get(item.get("id")) if isinstance(item, dict) else None
+        uri = (item.get("uri") or {}).get("external") if kind else None
+        if not isinstance(uri, str):
+            continue
+        history = {"workspace": {"configPath": uri}} if kind == "workspace" else {kind: uri}
+        e = entry(history, home, user.parent / "Workspaces")
         if e and e["uri"] not in seen:
             seen.add(e["uri"])
             found.append(e)

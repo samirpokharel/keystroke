@@ -19,6 +19,7 @@ import "core/Patterns.js" as Patterns
 import "core/SmartMatch.js" as SmartMatch
 import "core/Motion.js" as Motion
 import "core/Commands.js" as Commands
+import "core/Bindings.js" as Bindings
 import "matching" as Matching
 
 // Keystroke: an extension-first command palette that replaces the Omarchy
@@ -468,7 +469,41 @@ Item {
     out.push({ label: root.compact ? "Settings" : "Provider settings", key: "ctrl K" })
     return out
   }
-  readonly property bool previewVisible: !dmenuActive && paletteSettings.showPreview !== false && !!(current.preview || current.previewImage || current.swatch)
+  // smr: Raycast-style. Idle, the palette is the narrow stock menu; once
+  // you type it widens to two columns, results left and the selected row's
+  // detail right (its preview, a picture for image files, or its icon and
+  // name). Provider screens keep upstream's rule: the pane only when the
+  // row has something to preview.
+  // smr: the keybinding(s) that do what the selected row does, for the
+  // preview pane. The index rebuilds only when the bind list reloads.
+  readonly property var bindIndex: Bindings.index(providerRegistry.hotkeyBinds)
+  readonly property var currentKeys: {
+    var row = root.current
+    var command = ""
+    if (row && row.action && row.action.type === "app") {
+      var entry = DesktopEntries.byId(String(row.action.id || ""))
+      if (entry) command = entry.command
+    }
+    var appId = row && row.action ? String(row.action.id || "") : ""
+    var extra = !appId ? "" : appId === root.defaultApps.terminal ? "omarchy-launch-terminal"
+      : appId === root.defaultApps.browser ? "omarchy-launch-browser" : ""
+    return Bindings.forRow(row, root.bindIndex, command, extra)
+  }
+  // Desktop ids behind Omarchy's generic launchers, read once per shell start.
+  property var defaultApps: ({ terminal: "", browser: "" })
+  Process {
+    running: true
+    command: ["bash", "-c", "xdg-terminal-exec --print-id 2>/dev/null | head -1; omarchy-cmd-default-browser 2>/dev/null | head -1"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var lines = String(text || "").split("\n").map(function(l) { return l.trim().replace(/\.desktop$/, "") })
+        root.defaultApps = { terminal: lines[0] || "", browser: lines[1] || "" }
+      }
+    }
+  }
+  readonly property bool wideSearch: !dmenuActive && !providerViewActive && search.text.length > 0
+  readonly property bool previewVisible: !dmenuActive && paletteSettings.showPreview !== false && rows.length > 0
+    && (wideSearch || !!(current.preview || current.previewImage || current.swatch))
 
   // ---------------------------------------------------------------- motion
   // Three tiers (core/Motion.js) drive every transition: the window's
@@ -1277,10 +1312,55 @@ Item {
   }
 
   // ------------------------------------------------------------------ view
-  readonly property int headerHeight: Style.space(compact ? 66 : 78)
-  readonly property int crumbHeight: Style.space(30)
-  readonly property int footerHeight: Style.space(46)
-  readonly property int rowHeight: Style.space(compact ? 46 : 56)
+  // smr: the stock Omarchy menu's proportions. A short header that reads
+  // "Go…", no hint line or footer until there is something to say, and a
+  // card that fits its rows instead of a fixed 760×580 palette.
+  readonly property int headerHeight: Style.space(compact ? 50 : 58)
+  readonly property int crumbHeight: Style.space(24)
+  readonly property int footerHeight: Style.space(38)
+  readonly property bool idleRoot: !dmenuActive && !scope && !search.text && !providerViewActive
+  readonly property bool showCrumbs: !dmenuActive && !!commandHint
+  // How many Omarchy menu rows lead the idle root; a divider follows them.
+  readonly property int idleSplit: {
+    if (!idleRoot) return -1
+    var n = 0
+    while (n < rows.length && rows[n].providerKey === "omarchy") n++
+    return n > 0 && n < rows.length ? n : -1
+  }
+  // smr: no key legend; the footer appears only to report a problem.
+  readonly property bool showFooter: !dmenuActive && !!errorMessage
+  readonly property int maxCardHeight: Style.space(compact ? 560 : 600)
+  readonly property int cardWidth: dmenuActive ? Style.space(dmenuWidth)
+    : providerViewActive || wideSearch ? Style.space(compact ? 640 : 760)
+    : Style.space(320)
+  // Frozen once per summon, like the stock menu, so a shrinking result list
+  // never moves the search field under the cursor.
+  // Until then the card stays centred on whatever the idle root needs.
+  property int cardTop: -1
+  function freezeCardTop() { if (root.opened && root.cardTop < 0) root.cardTop = card.centeredTop }
+  Connections {
+    target: root
+    function onOpenedChanged() { root.cardTop = -1 }
+    function onScopeChanged() { root.freezeCardTop() }
+  }
+  Connections {
+    target: search
+    function onTextChanged() { root.freezeCardTop() }
+  }
+  // The list's natural height, from the model rather than the ListView:
+  // contentHeight depends on the view's own height and would loop.
+  readonly property int listNaturalHeight: {
+    var deps = [root.rows, root.idleSplit, root.scope, search.text, root.compact]
+    var headerH = Style.space(compact ? 22 : 26), total = 0
+    for (var i = 0; i < resultModel.count; i++) {
+      var r = resultModel.get(i)
+      if (i > 0) total += rowSpacing
+      total += rowHeight
+      if (i === idleSplit) total += Style.space(9)
+    }
+    return total
+  }
+  readonly property int rowHeight: Style.space(compact ? 44 : 50)
   readonly property int rowSpacing: Style.space(3)
   readonly property int dmenuRowsHeight: {
     // The empty state is a glyph plus a label, so one row clips it.
@@ -1308,15 +1388,35 @@ Item {
 
     Rectangle { anchors.fill: parent; color: root.scrim; opacity: root.reveal; MouseArea { anchors.fill: parent; onClicked: root.cancel() } }
 
-    BorderSurface {
+    // Cut corners to match the Hyprland windows (rounding_power = 1).
+    ChamferSurface {
       id: card
-      width: Math.min(root.dmenuActive ? Style.space(root.dmenuWidth) : Style.space(root.compact ? 640 : 760), panel.width - Style.gapsOut * 2)
+      cut: 12
+      readonly property int maxHeight: Math.min(root.maxCardHeight, panel.height - Style.gapsOut * 2)
+      // Rows (or room for the empty state), plus whichever chrome is showing.
+      readonly property int listHeight: Math.max(resultModel.count ? 0 : root.rowHeight * 3, root.listNaturalHeight)
+      readonly property int fitHeight: root.headerHeight + (root.showCrumbs ? root.crumbHeight : 0) + Style.space(10)
+        + listHeight + Style.space(12) + (root.showFooter ? root.footerHeight : 0)
+      readonly property int centeredTop: Math.max(Style.gapsOut, Math.round((panel.height - height) / 2))
+      // smr: the width the card is heading to. Content lays out at this width
+      // straight away and the card's frame animates around it, so a resize
+      // costs one cheap clip per frame instead of re-eliding every row.
+      readonly property int targetWidth: Math.min(root.cardWidth, panel.width - Style.gapsOut * 2)
+      width: targetWidth
       height: root.dmenuActive
         ? Math.min(root.headerHeight + (root.mode === "input" ? Style.space(12) : root.dmenuRowsHeight + Style.space(20)), panel.height - Style.gapsOut * 2)
-        : Math.min(Style.space(root.compact ? 540 : 580), panel.height - Style.gapsOut * 2)
+        : root.providerViewActive ? maxHeight
+        // Two columns get a steady floor so a picture has room and the card
+        // doesn't jump with every keystroke.
+        : Math.min(root.wideSearch ? Math.max(fitHeight, Style.space(root.compact ? 380 : 420)) : fitHeight,
+                   maxHeight, panel.height - Style.gapsOut - Math.max(Style.gapsOut, root.cardTop))
       anchors.horizontalCenter: parent.horizontalCenter
-      y: (root.dmenuActive ? Math.max(Style.gapsOut, Math.round((panel.height - height) / 2)) : Math.max(Style.gapsOut, Math.round((panel.height - height) * 0.38)))
+      y: (root.dmenuActive || root.cardTop < 0 ? centeredTop : root.cardTop)
          + (root.windowSlides ? Math.round((1 - root.reveal) * Style.space(Motion.WINDOW_SLIDE_PX)) : 0)
+      // OutQuint: most of the travel in the first frames, then a long soft
+      // settle, so it reads as quick without a hard stop.
+      Behavior on width { enabled: root.opened && root.motion.selection > 0; NumberAnimation { duration: 200; easing.type: Easing.OutQuint } }
+      Behavior on height { enabled: root.opened && root.motion.selection > 0; NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
       opacity: root.reveal
       radius: Style.cornerRadius
       color: root.background
@@ -1330,14 +1430,15 @@ Item {
       // it needs and keeps both inside the card's border. Filling the card
       // outright would paint over the border ring, which BorderSurface draws
       // as the surface itself (or as an overlay child below this z).
-      Rectangle {
+      // smr: chamfered too, or its square corners would poke past the card's cuts.
+      ChamferSurface {
         id: viewBackdrop
         visible: !!providerView.item
         z: 4
         anchors.fill: parent
         anchors.topMargin: card.borderTop; anchors.rightMargin: card.borderRight
         anchors.bottomMargin: card.borderBottom; anchors.leftMargin: card.borderLeft
-        radius: Math.max(0, card.radius - Math.max(card.borderTop, card.borderLeft))
+        cut: card.innerCut()
         color: root.background
       }
 
@@ -1361,9 +1462,8 @@ Item {
           id: glyph
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(22); height: width
-          Rectangle { visible: !voice.active; x: 1; y: 1; width: Style.space(15); height: width; radius: width / 2; color: "transparent"; border.color: root.accent; border.width: 1.8 }
-          Rectangle { visible: !voice.active; x: Style.space(13); y: Style.space(13); width: Style.space(9); height: 1.8; radius: 0.9; rotation: 45; transformOrigin: Item.Left; color: root.accent }
+          // smr: no magnifier, like the stock menu; the slot opens only for the recording dot.
+          width: voice.active ? Style.space(22) : 0; height: Style.space(22)
           // Recording dot, swelling with the microphone.
           Rectangle {
             visible: voice.active
@@ -1423,7 +1523,7 @@ Item {
         TextInput {
           id: search
           anchors.left: glyph.right
-          anchors.leftMargin: Style.space(14)
+          anchors.leftMargin: voice.active ? Style.space(14) : 0
           anchors.right: root.liveText ? wave.left : escCap.left
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
@@ -1442,8 +1542,8 @@ Item {
           Text {
             anchors.fill: parent
             verticalAlignment: Text.AlignVCenter
-            text: root.dictationMode ? "Speak or edit your dictation…" : root.dmenuActive ? root.dmenuPrompt + "…" : root.scope ? "Search " + root.scopeTitle.toLowerCase() + "…" : "What would you like to do?"
-            color: Util.alpha(root.foreground, 0.42)
+            text: root.dictationMode ? "Speak or edit your dictation…" : root.dmenuActive ? root.dmenuPrompt + "…" : root.scope ? root.scopeTitle + "…" : "Go…"
+            color: Util.alpha(root.foreground, 0.58)
             font: parent.font
             visible: !parent.text && !parent.preeditText && !voice.active
             elide: Text.ElideRight
@@ -1514,31 +1614,26 @@ Item {
             }
           }
         }
-        Keycap { id: escCap; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; label: "esc"; foreground: root.foreground }
+        // smr: hidden; kept as the right-hand anchor for the field and the wave.
+        Keycap { id: escCap; visible: false; width: 0; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; label: "esc"; foreground: root.foreground }
       }
-      Rectangle { x: 0; y: root.headerHeight; width: parent.width; height: 1; color: root.hairline }
 
       // Breadcrumb line (palette mode)
-      Row {
+      Text {
         id: crumbs
-        visible: !root.dmenuActive
+        visible: root.showCrumbs
         transform: levelShift
         opacity: root.levelOpacity
-        x: Style.space(root.compact ? 22 : 26); y: root.headerHeight + Style.space(8)
+        x: Style.space(root.compact ? 20 : 24); y: root.headerHeight
+        width: parent.width - x * 2
         height: root.crumbHeight
-        spacing: Style.space(10)
-        Text { id: brand; anchors.verticalCenter: parent.verticalCenter; text: "OMARCHY"; textFormat: Text.PlainText; color: root.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.letterSpacing: 2; font.weight: Font.Bold }
-        Text { anchors.baseline: brand.baseline; text: root.scope ? "›" : "/"; textFormat: Text.PlainText; color: Util.alpha(root.foreground, 0.35); font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-        Text {
-          anchors.baseline: brand.baseline
-          width: Math.max(0, crumbs.parent.width - crumbs.x * 2 - brand.width - Style.space(30))
-          elide: Text.ElideRight
-          // The hint line: a recognised command names its action and the
-          // argument the caret is on; the empty root says how to list them.
-          text: root.scope ? root.scopeTitle : root.commandHint ? root.commandHint : search.text ? "Search results" : "Apps, commands, answers · / lists what you can type"
-          textFormat: Text.PlainText
-          color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
-        }
+        verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
+        // The hint line: a recognised command names its action and the
+        // argument the caret is on; a scope shows where you are.
+        text: root.commandHint || ""
+        textFormat: Text.PlainText
+        color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
       }
 
       // Results and preview
@@ -1546,17 +1641,21 @@ Item {
         id: content
         transform: levelShift
         opacity: root.levelOpacity
-        x: Style.space(12)
-        y: root.dmenuActive ? root.headerHeight + Style.space(10) : root.headerHeight + root.crumbHeight + Style.space(10)
-        width: parent.width - Style.space(24)
-        height: parent.height - y - (root.dmenuActive ? Style.space(10) : root.footerHeight + Style.space(10))
+        // Centred at the target width: it stays still on screen while the
+        // card's edges sweep out (or in) around it.
+        x: Math.round((parent.width - width) / 2)
+        y: root.headerHeight + (root.showCrumbs ? root.crumbHeight : 0) + Style.space(root.dmenuActive ? 10 : 0)
+        width: card.targetWidth - Style.space(24)
+        height: parent.height - y - (root.showFooter ? root.footerHeight : Style.space(12))
 
         ListView {
           id: resultList
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: root.previewVisible ? Math.round(parent.width * 0.55) : parent.width
+          // Split as soon as typing starts, not when the first rows land, so
+          // the list doesn't reflow from full width to 55% a beat later.
+          width: root.previewVisible || root.wideSearch ? Math.round(parent.width * 0.55) : parent.width
           model: resultModel
           clip: true
           spacing: root.rowSpacing
@@ -1566,7 +1665,8 @@ Item {
           // its own; its geometry is bound here so it covers the row and not
           // the delegate's section header.
           highlightFollowsCurrentItem: false
-          highlight: BorderSurface {
+          highlight: ChamferSurface {
+            cut: 6
             readonly property var row: resultList.currentItem
             z: 0
             visible: !!row && root.rows.length > 0
@@ -1601,7 +1701,20 @@ Item {
             width: resultList.width
             // The idle root lists one row per provider, so headers would label single items there;
             // they return as soon as a query or a scope groups real sets.
-            readonly property bool showHeader: !root.dmenuActive && (!!root.scope || !!search.text) && sectionStart && !!section
+            // smr: one plain list, like the stock menu; no section headers.
+            readonly property bool showHeader: false
+            // smr: the stock menu's hairline between its own rows and the extras below.
+            Item {
+              width: parent.width
+              height: root.idleSplit === delegateRoot.index ? Style.space(9) : 0
+              visible: height > 0
+              Rectangle {
+                x: Style.space(4); width: parent.width - Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                height: Style.spacing.hairline
+                color: Util.alpha(root.foreground, 0.2)
+              }
+            }
             Item {
               width: parent.width
               height: delegateRoot.showHeader ? Style.space(root.compact ? 22 : 26) : 0
@@ -1627,19 +1740,51 @@ Item {
               selected: root.selected === delegateRoot.index
               accent: root.accent; foreground: root.foreground
               selectedBackground: root.selectedBackground; selectedText: root.selectedText; selectedBorderSpec: root.selectedBorderSpec
+              showSubtitle: root.dmenuActive
               onHovered: function(item, mouse) { root.selectFromPointer(delegateRoot.index, item, mouse) }
               onActivated: { root.selectionTouched = true; root.selected = delegateRoot.index; root.activate() }
               Connections { target: root; function onFlashed(uid) { if (uid === delegateRoot.uid) rowItem.flash() } }
             }
           }
         }
-        Rectangle { visible: root.previewVisible; x: resultList.width + Style.space(12); width: 1; height: parent.height - Style.space(12); color: root.hairline }
+        // smr: the stock menu's scroll scrims, strength tracking how much is
+        // still hidden past each edge.
+        Rectangle {
+          x: resultList.x; width: resultList.width; anchors.top: parent.top
+          height: Math.min(Style.space(28), parent.height / 2)
+          visible: opacity > 0
+          opacity: resultList.contentHeight > resultList.height ? Math.max(0, Math.min(1, (resultList.contentY - resultList.originY) / height)) : 0
+          gradient: Gradient {
+            GradientStop { position: 0; color: root.background }
+            GradientStop { position: 1; color: Util.alpha(root.background, 0) }
+          }
+        }
+        Rectangle {
+          x: resultList.x; width: resultList.width; anchors.bottom: parent.bottom
+          height: Math.min(Style.space(28), parent.height / 2)
+          visible: opacity > 0
+          opacity: resultList.contentHeight > resultList.height
+            ? Math.max(0, Math.min(1, (resultList.originY + resultList.contentHeight - resultList.height - resultList.contentY) / height)) : 0
+          gradient: Gradient {
+            GradientStop { position: 0; color: Util.alpha(root.background, 0) }
+            GradientStop { position: 1; color: root.background }
+          }
+        }
+        Rectangle {
+          x: resultList.width + Style.space(12); width: 1; height: parent.height - Style.space(12); color: root.hairline
+          opacity: root.previewVisible ? 1 : 0
+          visible: opacity > 0
+          Behavior on opacity { enabled: root.opened && root.motion.selection > 0; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        }
         PreviewPane {
-          visible: root.previewVisible
+          opacity: root.previewVisible ? 1 : 0
+          visible: opacity > 0
+          Behavior on opacity { enabled: root.opened && root.motion.selection > 0; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
           x: resultList.width + Style.space(30)
           width: parent.width - x - Style.space(10)
           height: parent.height
           row: root.current
+          shortcuts: root.currentKeys
           compact: root.compact
             foreground: root.foreground
         }
@@ -1648,7 +1793,7 @@ Item {
           visible: root.rows.length === 0 && root.mode !== "input" && (!root.pending || root.showLoading)
           anchors.centerIn: parent
           spacing: Style.space(12)
-          Text { anchors.horizontalCenter: parent.horizontalCenter; text: "✳"; color: root.accent; font.pixelSize: Style.space(40) }
+          Text { anchors.horizontalCenter: parent.horizontalCenter; text: "󰈉"; color: root.selectedText; opacity: 0.8; font.family: root.fontFamily; font.pixelSize: Style.font.displayLarge }
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.pending ? "Finding your next move…" : search.text ? "No matches for “" + search.text + "”" : root.scope === "clipboard" ? "Your clipboard is empty" : root.scope === "files" ? "Type to search your home folder" : "Nothing here yet"
@@ -1663,9 +1808,8 @@ Item {
       }
 
       // Footer (palette mode)
-      Rectangle { visible: !root.dmenuActive; x: 0; y: parent.height - root.footerHeight; width: parent.width; height: 1; color: root.hairline }
       Item {
-        visible: !root.dmenuActive
+        visible: root.showFooter
         x: Style.space(22); y: parent.height - root.footerHeight; width: parent.width - Style.space(44); height: root.footerHeight
         Row {
           anchors.verticalCenter: parent.verticalCenter; spacing: Style.space(8)
@@ -1679,6 +1823,7 @@ Item {
           }
         }
         Row {
+          visible: false
           anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: Style.space(16)
           Repeater {
             model: root.footerActions
@@ -1715,7 +1860,7 @@ Item {
         scrim: root.scrim
         selectedText: root.selectedText
         fontFamily: root.fontFamily
-        cornerRadius: Style.cornerRadius
+        cornerRadius: 0
         onCanceled: { root.confirmPending = null; Qt.callLater(function() { search.forceActiveFocus() }) }
         onConfirmed: { var run = root.confirmPending ? root.confirmPending.run : null; root.confirmPending = null; if (run) run() }
       }

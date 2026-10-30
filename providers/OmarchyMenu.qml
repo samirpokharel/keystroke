@@ -363,10 +363,21 @@ Item {
     if (ctx.scope && ctx.scope.split("/")[0] !== "omarchy") return []
     if (!root.rowsLoaded) { ctx.pending(); return [] }
     var confirmDestructive = ctx.settings.confirmDestructive !== false
-    if (!ctx.scope && !ctx.query)
-      return [{ id: "menu", title: "Omarchy Menu", subtitle: "Your entire desktop, at your fingertips", icon: "\udb82\udcc7",
-                section: "Omarchy", verb: "Open", tier: "item", score: 28, order: 1,
-                action: { type: "navigate", scope: "omarchy/root", title: "Omarchy" } }]
+    // smr: the idle root opens on the stock menu itself (Apps, Learn, …,
+    // System) in its own order, ahead of every other provider and outside
+    // frecency, so the top of the palette never shuffles.
+    if (!ctx.scope && !ctx.query) {
+      var top = []
+      for (var t = 0; t < root.itemOrder.length; t++) {
+        var head = root.item(root.itemOrder[t])
+        if (!head || head.parent !== "root" || !root.isVisible(head)) continue
+        var row = root.rowFor(head, head.description, 1000, confirmDestructive)
+        row.remember = false
+        row.order = top.length
+        top.push(row)
+      }
+      return top
+    }
     var active = ctx.sub && root.item(ctx.sub) ? ctx.sub : "root"
     var rows = [], i, entry
     if (!ctx.query) {

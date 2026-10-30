@@ -1,3 +1,26 @@
+# Keystroke (SMR fork)
+
+A personal fork of [evindor/keystroke](https://github.com/evindor/keystroke) 1.5.2, styled to
+match the [Graphite Pine](https://github.com/samirpokharel/omarchy-graphite-pine-theme) Omarchy
+theme. Plugin id `smr.keystroke`. Changes, all marked `smr:` in the source:
+
+- **Stock-menu idle, Raycast-style search.** Idle, the palette is the narrow Omarchy menu
+  ("Go…"). Typing widens it to two columns: results left, the selected row's detail right.
+  The frame animates around content laid out at its final width, so the resize stays smooth.
+- **Detail pane for every row.** Previews, answers and pictures as upstream; anything else
+  shows its icon, name and subtitle.
+- **Shortcuts in the detail pane** (`core/Bindings.js`). The keybinding that does what the
+  selected row does: Screenshot shows Print, a submenu the bind that opens it, an app the
+  bind that launches it (including the default terminal and browser).
+- **Cut corners** (`ui/ChamferSurface.qml`): a 45° bevel on the card, rows and highlight.
+- **Extension fixes.** Browser search resolves Omarchy's `omarchy-browser.desktop` wrapper
+  to the real browser. Recent projects falls back to VS Code's File › Open Recent list
+  in `storage.json` when `state.vscdb` lacks `history.recentlyOpenedPathsList`.
+
+Everything below is upstream's README.
+
+---
+
 # Keystroke
 
 A Raycast-style command palette that **replaces the Omarchy menu**. One native Omarchy `menu` plugin in QML and JavaScript, running inside the existing `omarchy-shell` process, themed by whatever Omarchy theme is active. Type, or speak, what you want: apps, the whole Omarchy menu, calculations, conversions, colors, emoji, clipboard history, files, Codex, and anything an extension adds. Smart Match, a small embedding model running locally, understands what you mean when the words do not match exactly.

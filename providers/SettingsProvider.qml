@@ -21,7 +21,8 @@ Item {
     description: "Providers, appearance and the config file",
     settings: [],
     query: function(ctx) { return root.query(ctx) },
-    catalog: function(ctx) { return SettingsTree.catalog(root.current(), ctx.scope) },
+    // smr: not offered to Smart Match at the root either (see query()).
+    catalog: function(ctx) { return ctx.scope ? SettingsTree.catalog(root.current(), ctx.scope) : [] },
   })
 
   function model() {
@@ -69,6 +70,9 @@ Item {
     var t = root.current()
     var screen = ctx.scope ? t.screens[ctx.scope] : null
     if (screen) return root.valueRows(ctx, screen)
+    // smr: the main search offers only the Settings entry itself; every
+    // setting stays searchable inside it, without crowding app results.
+    if (!ctx.scope && ctx.query) return SettingsTree.rows(t.nodes.filter(function(n) { return n.parentScope === "" }), "", ctx.query)
     return SettingsTree.rows(t.nodes, ctx.scope, ctx.query)
   }
 }

@@ -8,8 +8,11 @@ import qs.Ui
 // only the highlight and the title weight: the keys that act on the row are
 // the footer's job, and provenance (an extension's badge, where a page came
 // from) belongs to the preview pane.
-BorderSurface {
+// smr: chamfered (cut 6) like the stock menu's rows, plain icons instead of
+// chips, and the menu's heading-size labels.
+ChamferSurface {
   id: root
+  cut: 6
   property string title: ""
   property string subtitle: ""
   property string icon: ""
@@ -23,6 +26,8 @@ BorderSurface {
   property bool disabled: false
   property bool answer: false
   property bool selected: false
+  // Off at the idle root, where the stock menu shows labels only.
+  property bool showSubtitle: true
   // Off when the host paints one gliding highlight behind the rows instead.
   property bool paintsSelection: true
   // The activation flash: a brief pulse of the selected text color, rising
@@ -41,7 +46,7 @@ BorderSurface {
   readonly property color textColor: selected ? selectedText : foreground
   readonly property int chip: compact ? Style.space(28) : Style.space(34)
 
-  height: compact ? Style.space(46) : Style.space(56)
+  height: compact ? Style.space(44) : Style.space(50)
   radius: Style.cornerRadius
   color: selected && paintsSelection ? selectedBackground : "transparent"
   borderSpec: selected && paintsSelection ? selectedBorderSpec : Border.none()
@@ -57,7 +62,7 @@ BorderSurface {
   Rectangle {
     id: flashLayer
     anchors.fill: parent
-    radius: root.radius
+    radius: 0
     color: root.selectedText
     opacity: 0
     SequentialAnimation {
@@ -74,21 +79,21 @@ BorderSurface {
     width: root.chip
     height: width
     radius: Math.min(Style.cornerRadius, Style.space(root.compact ? 7 : 9))
-    color: root.iconSource && !root.shortcut ? "transparent" : (root.answer || root.shortcut ? Util.alpha(root.accent, 0.16) : Util.alpha(root.foreground, 0.07))
+    color: root.answer || root.shortcut ? Util.alpha(root.accent, 0.16) : "transparent"
     Text {
       anchors.centerIn: parent
       visible: !!root.shortcut || !root.iconSource || appIcon.status !== Image.Ready
       text: root.shortcut || root.icon
       textFormat: Text.PlainText
-      color: root.shortcut ? root.accent : root.tint ? root.tint : (root.answer ? root.accent : Util.alpha(root.foreground, 0.8))
+      color: root.shortcut ? root.accent : root.tint ? root.tint : (root.answer ? root.accent : root.textColor)
       font.family: root.shortcut ? Style.font.menuFamily : root.iconFont ? root.iconFont : Style.font.menuFamily
       font.weight: root.shortcut ? Font.Bold : Font.Normal
-      font.pixelSize: root.compact ? Style.font.iconLarge : Style.font.iconLarge + 3
+      font.pixelSize: Style.font.iconLarge
     }
     Image {
       id: appIcon
       anchors.fill: parent
-      anchors.margins: Style.space(2)
+      anchors.margins: Style.space(root.compact ? 5 : 6)
       visible: !!root.iconSource && !root.shortcut
       source: root.iconSource
       fillMode: Image.PreserveAspectFit
@@ -101,7 +106,7 @@ BorderSurface {
   Column {
     id: body
     anchors.left: iconChip.right
-    anchors.leftMargin: Style.space(11)
+    anchors.leftMargin: Style.space(6)
     anchors.right: trail.left
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
@@ -113,12 +118,12 @@ BorderSurface {
       textFormat: Text.PlainText
       color: root.textColor
       font.family: Style.font.menuFamily
-      font.pixelSize: root.answer ? Style.font.heading : (root.compact ? Style.font.title : Style.font.title + 1)
-      font.weight: root.selected || root.answer ? Font.DemiBold : Font.Medium
+      font.pixelSize: Style.font.heading
+      font.weight: root.answer ? Font.DemiBold : Font.Medium
       elide: Text.ElideRight
     }
     Text {
-      visible: !!root.subtitle
+      visible: !!root.subtitle && root.showSubtitle
       width: parent.width
       text: root.subtitle
       textFormat: Text.PlainText
@@ -136,9 +141,9 @@ BorderSurface {
     anchors.right: parent.right
     anchors.rightMargin: Style.space(12)
     anchors.verticalCenter: parent.verticalCenter
-    text: root.accessory ? root.accessory : (root.disabled ? "" : (root.verb === "Open" ? "›" : ""))
+    text: root.accessory && root.accessory.length <= 2 ? root.accessory : (root.disabled ? "" : (root.verb === "Open" ? "›" : ""))
     textFormat: Text.PlainText
-    color: root.accessory ? root.textColor : Util.alpha(root.textColor, 0.4)
+    color: root.accessory ? root.textColor : Util.alpha(root.textColor, 0.36)
     font.family: Style.font.menuFamily
     font.pixelSize: root.accessory ? Style.font.bodySmall : Style.font.heading
   }

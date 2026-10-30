@@ -60,7 +60,9 @@ Item {
 
   function query(ctx) {
     if (ctx.scope && ctx.scope !== "applications") return []
-    if (!ctx.scope && !ctx.query)
+    // smr: the Omarchy menu's own Apps row opens this provider at the idle root.
+    if (!ctx.scope && !ctx.query) return []
+    if (false)
       return [{ id: "apps", title: "Applications", subtitle: "Every app, one shortcut away", icon: "󰀻", section: "Applications",
                 verb: "Open", tier: "item", score: 30, order: 0, action: { type: "navigate", scope: "applications", title: "Applications" } }]
     if (!root.library) return []

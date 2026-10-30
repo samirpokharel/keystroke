@@ -31,7 +31,8 @@ Item {
         description: "Binds Omarchy cannot run from a menu (Lua closures such as Close window) still appear, greyed, so the keys can be learned." }
     ],
     query: function(ctx) { return root.query(ctx) },
-    catalog: function(ctx) { return root.catalog(ctx) },
+    // smr: not offered to Smart Match at the root either (see query()).
+    catalog: function(ctx) { return ctx.scope ? root.catalog(ctx) : [] },
     activate: function(row, ctx) { return root.activate(row) },
     opened: function() { root.refresh(false) }
   })
@@ -86,6 +87,9 @@ Item {
       if (!ctx.query) return [Hotkeys.navRow(18)]
       var s = Match.match(ctx.query, "Hotkeys", "keybindings keys shortcuts bindings hyprland")
       if (s) rows.push(Hotkeys.navRow(s))
+      // smr: individual binds only inside the Hotkeys screen; at the root
+      // they duplicated the apps they launch.
+      return rows
     }
     if (!root.loaded) { root.refresh(true); ctx.pending(); return rows }
     return rows.concat(Hotkeys.rows(ctx.query, root.binds, ctx.settings, !!ctx.scope))
