@@ -42,8 +42,13 @@ def payload(mode, url):
 def main():
     try:
         mime, data = payload(*sys.argv[1:])
+        # smr: wl-copy keeps serving the clipboard from a forked child after
+        # this helper exits. Quickshell kills the helper's whole process group
+        # when its Process goes away (palette closed, service unloaded), which
+        # took that child with it and left the clipboard empty. A new session
+        # puts wl-copy outside that group.
         subprocess.run(["wl-copy", "--type", mime], input=data, check=True, timeout=10,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return 0
     except Exception as error:
         print("Copy failed: " + str(error))
